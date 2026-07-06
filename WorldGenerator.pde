@@ -1,9 +1,11 @@
 int gridWidth = 100;
 int gridHeight = 100;
-int tileSize = 10;
-float scale = 0.1;
+int tileSize = 2.5;
+float heightScale = 0.1;
+float tempScale = 0.08;
 
-int[][] worldMap;
+int[][] heightMap;
+float[][] tempMap;
 
 void settings() {
   size(1000, 1000);
@@ -23,23 +25,31 @@ void draw() {
 }
 
 void generateWorld() {
-  worldMap = new int[gridWidth][gridHeight];
+  heightMap = new int[gridWidth][gridHeight];
+  tempMap = new float[gridWidth][gridHeight];
   
-  // Use Perlin noise for natural-looking terrain
+  // Generate height map using Perlin noise
   for (int x = 0; x < gridWidth; x++) {
     for (int y = 0; y < gridHeight; y++) {
-      float value = noise(x * scale, y * scale);
+      float heightValue = noise(x * heightScale, y * heightScale);
       
-      // Classify terrain based on noise value
-      if (value < 0.35) {
-        worldMap[x][y] = 0; // Water
-      } else if (value < 0.45) {
-        worldMap[x][y] = 1; // Sand/Desert
-      } else if (value < 0.65) {
-        worldMap[x][y] = 2; // Plains
+      // Classify terrain based on height value
+      if (heightValue < 0.35) {
+        heightMap[x][y] = 0; // Water
+      } else if (heightValue < 0.45) {
+        heightMap[x][y] = 1; // Beach
+      } else if (heightValue < 0.75) {
+        heightMap[x][y] = 2; // Main terrain (plains/desert/savannah/forest/arctic - determined by temp)
       } else {
-        worldMap[x][y] = 3; // Forest
+        heightMap[x][y] = 3; // Mountains
       }
+    }
+  }
+  
+  // Generate temperature map using separate Perlin noise
+  for (int x = 0; x < gridWidth; x++) {
+    for (int y = 0; y < gridHeight; y++) {
+      tempMap[x][y] = noise(1000 + x * tempScale, 1000 + y * tempScale);
     }
   }
 }
@@ -49,26 +59,36 @@ void drawWorld() {
   
   for (int x = 0; x < gridWidth; x++) {
     for (int y = 0; y < gridHeight; y++) {
-      int tile = worldMap[x][y];
+      int height = heightMap[x][y];
+      float temp = tempMap[x][y];
       
       // Set color based on terrain type
-      switch(tile) {
+      switch(height) {
         case 0: // Water
           fill(64, 164, 223);
           break;
-        case 1: // Desert
+        case 1: // Beach
           fill(238, 214, 175);
           break;
-        case 2: // Plains
-          fill(144, 238, 144);
+        case 2: // Main terrain - varies by temperature
+          if (temp < 0.2) {
+            fill(255, 255, 255); // Arctic plains (very cold)
+          } else if (temp < 0.35) {
+            fill(144, 238, 144); // Forest (slightly cold)
+          } else if (temp < 0.5) {
+            fill(144, 238, 144); // Plains (temperate)
+          } else if (temp < 0.7) {
+            fill(184, 184, 82); // Savannah (dark yellow, hot)
+          } else {
+            fill(255, 165, 0); // Desert (orange, very hot)
+          }
           break;
-        case 3: // Forest
-          fill(34, 139, 34);
+        case 3: // Mountains
+          fill(128, 128, 128);
           break;
       }
       
-      stroke(0);
-      strokeWeight(0.5);
+      noStroke();
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
     }
   }
