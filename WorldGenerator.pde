@@ -19,6 +19,9 @@ ArrayList<Bush> bushes = new ArrayList<Bush>();
 
 PImage blobImage;
 
+// UI
+Blob selectedBlob = null;
+
 // Timing
 int simulationStep = 0;
 
@@ -29,6 +32,7 @@ void settings() {
 void setup() {
   generateWorld();
   spawnInitialBushes();
+  spawnInitialBlobs();
   
   // Load blob image (placeholder - will use a circle if image not found)
   // blobImage = loadImage("blob.png");
@@ -36,19 +40,6 @@ void setup() {
 
 void draw() {
   background(51);
-  
-  // Update camera position based on mouse movement
-  if (mousePressed) {
-    camX -= (mouseX - pmouseX) * 2 / zoomLevel;
-    camY -= (mouseY - pmouseY) * 2 / zoomLevel;
-  }
-  
-  // Spawn blob on click
-  if (mousePressed) {
-    float worldX = camX + (mouseX - width/2) / zoomLevel;
-    float worldY = camY + (mouseY - height/2) / zoomLevel;
-    spawnBlob(worldX / 5, worldY / 5); // Convert to grid coordinates
-  }
   
   // Keyboard controls for camera
   if (keyPressed) {
@@ -67,6 +58,13 @@ void draw() {
   drawBlobs();
   drawBushes();
   drawHUD();
+  
+  // Draw selected blob info panel
+  if (selectedBlob != null && !selectedBlob.isDead()) {
+    drawBlobInfoPanel();
+  } else {
+    selectedBlob = null;
+  }
 }
 
 void generateWorld() {
@@ -97,9 +95,27 @@ void spawnInitialBushes() {
   }
 }
 
-void spawnBlob(float x, float y) {
-  boolean isMale = random(1) < 0.5;
-  blobs.add(new Blob(x, y, isMale, 100, 100)); // age 0, hunger 100, thirst 100
+void spawnInitialBlobs() {
+  // Spawn 5 blobs in grass biomes
+  int spawned = 0;
+  int attempts = 0;
+  
+  while (spawned < 5 && attempts < 100) {
+    int x = (int)random(gridWidth);
+    int y = (int)random(gridHeight);
+    
+    float h = heightMap[x][y];
+    float t = tempMap[x][y];
+    
+    // Only spawn in grass biomes
+    if (h >= 0.40 && h < 0.75 && t >= 0.35 && t < 0.7) {
+      boolean isMale = random(1) < 0.5;
+      blobs.add(new Blob(x + 0.5, y + 0.5, isMale, 50, 50));
+      spawned++;
+    }
+    
+    attempts++;
+  }
 }
 
 void updateSimulation() {
@@ -109,6 +125,9 @@ void updateSimulation() {
     b.update(heightMap, tempMap, bushes);
     
     if (b.isDead()) {
+      if (selectedBlob == b) {
+        selectedBlob = null;
+      }
       blobs.remove(i);
     }
   }
@@ -179,7 +198,7 @@ void drawBlobs() {
   translate(-camX, -camY);
   
   for (Blob b : blobs) {
-    b.display();
+    b.display(selectedBlob == b);
   }
   
   popMatrix();
@@ -198,6 +217,33 @@ void drawBushes() {
   }
   
   popMatrix();
+}
+
+void drawBlobInfoPanel() {
+  // Draw semi-transparent background
+  fill(0, 0, 0, 200);
+  rect(10, height - 150, 300, 140);
+  
+  // Draw text info
+  fill(255);
+  textSize(12);
+  textAlign(LEFT);
+  
+  String gender = selectedBlob.isMale ? "Male" : "Female";
+  text("Gender: " + gender, 20, height - 130);
+  text("Age: " + selectedBlob.age, 20, height - 110);
+  text("Hunger: " + (int)selectedBlob.hunger + "/100", 20, height - 90);
+  text("Thirst: " + (int)selectedBlob.thirst + "/100", 20, height - 70);
+  
+  // Draw reproduction bar
+  text("Reproduction:", 20, height - 50);
+  float reprodPercent = min(100 - selectedBlob.hunger, 100) / 100.0;
+  fill(100, 100, 100);
+  rect(20, height - 40, 200, 15);
+  fill(255, 100, 100);
+  rect(20, height - 40, 200 * reprodPercent, 15);
+  
+  textAlign(CENTER);
 }
 
 color getTerrainColor(float height, float temp) {
@@ -229,10 +275,30 @@ void mouseWheel(MouseEvent event) {
   zoomLevel = constrain(zoomLevel, minZoom, maxZoom);
 }
 
+void mousePressed() {
+  // Convert mouse position to world coordinates
+  float worldX = camX + (mouseX - width/2) / zoomLevel;
+  float worldY = camY + (mouseY - height/2) / zoomLevel;
+  float gridX = worldX / 5;
+  float gridY = worldY / 5;
+  
+  // Check if clicked on a blob
+  selectedBlob = null;
+  float clickRadius = 0.3;
+  
+  for (Blob b : blobs) {
+    if (dist(gridX, gridY, b.x, b.y) < clickRadius) {
+      selectedBlob = b;
+      break;
+    }
+  }
+}
+
 void drawHUD() {
   fill(255);
   textSize(14);
-  text("Click to spawn blobs | W/A/S/D: Move | Scroll: Zoom", 10, 20);
+  textAlign(LEFT);
+  text("W/A/S/D: Move | Scroll: Zoom | Click Blob: Select", 10, 20);
   text("Blobs: " + blobs.size() + " | Bushes: " + bushes.size(), 10, 40);
   text("Zoom: " + String.format("%.2f", zoomLevel) + "x", 10, 60);
 }
@@ -343,9 +409,18 @@ class Blob {
     return age > maxAge || hunger > 100 || thirst > 100;
   }
   
-  void display() {
+  void display(boolean selected) {
     fill(isMale ? 100 : 200, 150, 100); // Brown/reddish for male, pinkish for female
+    
+    if (selected) {
+      stroke(255, 255, 0);
+      strokeWeight(2);
+    } else {
+      noStroke();
+    }
+    
     circle(x * 5, y * 5, 3);
+    noStroke();
   }
   
   float getHeight(float px, float py, float[][] heightMap) {
