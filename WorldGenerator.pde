@@ -1,5 +1,5 @@
-int gridWidth = 1000;
-int gridHeight = 700;
+int gridWidth = 100;
+int gridHeight = 100;
 float heightScale = 0.1;
 float tempScale = 0.08;
 
@@ -13,12 +13,25 @@ float zoomLevel = 1.0;
 float minZoom = 0.2;
 float maxZoom = 10.0;
 
+// Simulation
+ArrayList<Blob> blobs = new ArrayList<Blob>();
+ArrayList<Bush> bushes = new ArrayList<Bush>();
+
+PImage blobImage;
+
+// Timing
+int simulationStep = 0;
+
 void settings() {
   size(1000, 1000);
 }
 
 void setup() {
   generateWorld();
+  spawnInitialBushes();
+  
+  // Load blob image (placeholder - will use a circle if image not found)
+  // blobImage = loadImage("blob.png");
 }
 
 void draw() {
@@ -30,6 +43,13 @@ void draw() {
     camY -= (mouseY - pmouseY) * 2 / zoomLevel;
   }
   
+  // Spawn blob on click
+  if (mousePressed) {
+    float worldX = camX + (mouseX - width/2) / zoomLevel;
+    float worldY = camY + (mouseY - height/2) / zoomLevel;
+    spawnBlob(worldX / 5, worldY / 5); // Convert to grid coordinates
+  }
+  
   // Keyboard controls for camera
   if (keyPressed) {
     if (key == 'w' || key == 'W') camY -= 10 / zoomLevel;
@@ -38,7 +58,14 @@ void draw() {
     if (key == 'd' || key == 'D') camX += 10 / zoomLevel;
   }
   
+  // Simulation updates
+  if (frameCount % 5 == 0) {
+    updateSimulation();
+  }
+  
   drawWorld();
+  drawBlobs();
+  drawBushes();
   drawHUD();
 }
 
@@ -55,6 +82,65 @@ void generateWorld() {
   }
 }
 
+void spawnInitialBushes() {
+  // Spawn bushes in grass biomes naturally
+  for (int x = 0; x < gridWidth; x++) {
+    for (int y = 0; y < gridHeight; y++) {
+      float h = heightMap[x][y];
+      float t = tempMap[x][y];
+      
+      // Spawn bushes in plains/forest (grass biomes)
+      if (h >= 0.40 && h < 0.75 && t >= 0.35 && t < 0.7 && random(1) < 0.05) {
+        bushes.add(new Bush(x + 0.5, y + 0.5, 3));
+      }
+    }
+  }
+}
+
+void spawnBlob(float x, float y) {
+  boolean isMale = random(1) < 0.5;
+  blobs.add(new Blob(x, y, isMale, 100, 100)); // age 0, hunger 100, thirst 100
+}
+
+void updateSimulation() {
+  // Update blobs
+  for (int i = blobs.size() - 1; i >= 0; i--) {
+    Blob b = blobs.get(i);
+    b.update(heightMap, tempMap, bushes);
+    
+    if (b.isDead()) {
+      blobs.remove(i);
+    }
+  }
+  
+  // Reproduction logic
+  for (int i = 0; i < blobs.size(); i++) {
+    for (int j = i + 1; j < blobs.size(); j++) {
+      Blob b1 = blobs.get(i);
+      Blob b2 = blobs.get(j);
+      
+      // Check if they can reproduce
+      if (b1.canReproduce(b2)) {
+        float childX = (b1.x + b2.x) / 2;
+        float childY = (b1.y + b2.y) / 2;
+        boolean childMale = random(1) < 0.5;
+        
+        Blob child = new Blob(childX, childY, childMale, 50, 50);
+        blobs.add(child);
+        
+        // Reduce parents' energy
+        b1.hunger += 20;
+        b2.hunger += 20;
+      }
+    }
+  }
+  
+  // Bush regrowth
+  for (Bush bush : bushes) {
+    bush.regrow();
+  }
+}
+
 void drawWorld() {
   pushMatrix();
   
@@ -68,83 +154,50 @@ void drawWorld() {
   
   noStroke();
   
-  // Draw with smooth interpolation
-  for (int x = 0; x < gridWidth - 1; x++) {
-    for (int y = 0; y < gridHeight - 1; y++) {
-      // Get the four corner heights and temperatures
-      float h1 = heightMap[x][y];
-      float h2 = heightMap[x + 1][y];
-      float h3 = heightMap[x + 1][y + 1];
-      float h4 = heightMap[x][y + 1];
+  // Draw tiles
+  for (int x = 0; x < gridWidth; x++) {
+    for (int y = 0; y < gridHeight; y++) {
+      float h = heightMap[x][y];
+      float t = tempMap[x][y];
       
-      float t1 = tempMap[x][y];
-      float t2 = tempMap[x + 1][y];
-      float t3 = tempMap[x + 1][y + 1];
-      float t4 = tempMap[x][y + 1];
+      color c = getTerrainColor(h, t);
+      fill(c);
       
-      // Draw smoothly interpolated quad
-      drawSmoothTile(x, y, h1, h2, h3, h4, t1, t2, t3, t4, 5);
+      rect(x * 5, y * 5, 5, 5);
     }
   }
   
   popMatrix();
 }
 
-void drawSmoothTile(int gridX, int gridY, float h1, float h2, float h3, float h4, float t1, float t2, float t3, float t4, float tileSize) {
-  float x1 = gridX * tileSize;
-  float y1 = gridY * tileSize;
-  float x2 = (gridX + 1) * tileSize;
-  float y2 = (gridY + 1) * tileSize;
+void drawBlobs() {
+  pushMatrix();
   
-  int subdivisions = 4;
-  float step = 1.0 / subdivisions;
+  translate(width / 2, height / 2);
+  scale(zoomLevel);
+  translate(-width / 2, -height / 2);
+  translate(-camX, -camY);
   
-  // Create subdivided mesh for smooth terrain
-  for (int i = 0; i < subdivisions; i++) {
-    for (int j = 0; j < subdivisions; j++) {
-      // Interpolate positions
-      float sx1 = x1 + i * (x2 - x1) * step;
-      float sy1 = y1 + j * (y2 - y1) * step;
-      float sx2 = sx1 + (x2 - x1) * step;
-      float sy2 = sy1 + (y2 - y1) * step;
-      
-      // Interpolate height and temperature at corners
-      float u1 = i * step;
-      float v1 = j * step;
-      float u2 = (i + 1) * step;
-      float v2 = (j + 1) * step;
-      
-      float h_tl = bilinearInterpolate(h1, h2, h3, h4, u1, v1);
-      float h_tr = bilinearInterpolate(h1, h2, h3, h4, u2, v1);
-      float h_br = bilinearInterpolate(h1, h2, h3, h4, u2, v2);
-      float h_bl = bilinearInterpolate(h1, h2, h3, h4, u1, v2);
-      
-      float t_tl = bilinearInterpolate(t1, t2, t3, t4, u1, v1);
-      float t_tr = bilinearInterpolate(t1, t2, t3, t4, u2, v1);
-      float t_br = bilinearInterpolate(t1, t2, t3, t4, u2, v2);
-      float t_bl = bilinearInterpolate(t1, t2, t3, t4, u1, v2);
-      
-      // Use average height to determine terrain type
-      float avgHeight = (h_tl + h_tr + h_br + h_bl) / 4.0;
-      float avgTemp = (t_tl + t_tr + t_br + t_bl) / 4.0;
-      
-      fill(getTerrainColor(avgHeight, avgTemp));
-      
-      beginShape();
-      vertex(sx1, sy1);
-      vertex(sx2, sy1);
-      vertex(sx2, sy2);
-      vertex(sx1, sy2);
-      endShape(CLOSE);
-    }
+  for (Blob b : blobs) {
+    b.display();
   }
+  
+  popMatrix();
 }
 
-float bilinearInterpolate(float v1, float v2, float v3, float v4, float u, float v) {
-  // v1 = top-left, v2 = top-right, v3 = bottom-right, v4 = bottom-left
-  float top = lerp(v1, v2, u);
-  float bottom = lerp(v4, v3, u);
-  return lerp(top, bottom, v);
+void drawBushes() {
+  pushMatrix();
+  
+  translate(width / 2, height / 2);
+  scale(zoomLevel);
+  translate(-width / 2, -height / 2);
+  translate(-camX, -camY);
+  
+  for (Bush bush : bushes) {
+    bush.display();
+  }
+  
+  popMatrix();
 }
 
 color getTerrainColor(float height, float temp) {
@@ -179,6 +232,167 @@ void mouseWheel(MouseEvent event) {
 void drawHUD() {
   fill(255);
   textSize(14);
-  text("Mouse: Pan | W/A/S/D: Move | Scroll: Zoom", 10, 20);
-  text("CamX: " + (int)camX + " CamY: " + (int)camY + " Zoom: " + String.format("%.2f", zoomLevel) + "x", 10, 40);
+  text("Click to spawn blobs | W/A/S/D: Move | Scroll: Zoom", 10, 20);
+  text("Blobs: " + blobs.size() + " | Bushes: " + bushes.size(), 10, 40);
+  text("Zoom: " + String.format("%.2f", zoomLevel) + "x", 10, 60);
+}
+
+// Blob class
+class Blob {
+  float x, y;
+  boolean isMale;
+  int age;
+  float hunger; // 0-100, higher is hungrier
+  float thirst; // 0-100, higher is thirstier
+  float speed = 0.05;
+  float maxAge = 10000;
+  
+  Blob(float x, float y, boolean isMale, float hunger, float thirst) {
+    this.x = x;
+    this.y = y;
+    this.isMale = isMale;
+    this.age = 0;
+    this.hunger = hunger;
+    this.thirst = thirst;
+  }
+  
+  void update(float[][] heightMap, float[][] tempMap, ArrayList<Bush> bushes) {
+    age++;
+    hunger += 0.5;
+    thirst += 0.3;
+    
+    // Eat from nearby bushes
+    for (Bush bush : bushes) {
+      if (dist(x, y, bush.x, bush.y) < 1) {
+        if (bush.fruits > 0) {
+          hunger -= 10;
+          bush.fruits--;
+          hunger = max(0, hunger);
+        }
+      }
+    }
+    
+    // Drink from water
+    float h = getHeight(x, y, heightMap);
+    if (h < 0.35) {
+      thirst -= 5;
+      thirst = max(0, thirst);
+    }
+    
+    // Move towards food/water
+    moveTowardsSurvival(heightMap, bushes);
+    
+    // Constrain to bounds
+    x = constrain(x, 0, gridWidth - 0.1);
+    y = constrain(y, 0, gridHeight - 0.1);
+  }
+  
+  void moveTowardsSurvival(float[][] heightMap, ArrayList<Bush> bushes) {
+    if (hunger > 50) {
+      // Move towards nearest bush with fruit
+      float closestDist = 10000;
+      float targetX = x, targetY = y;
+      
+      for (Bush bush : bushes) {
+        if (bush.fruits > 0) {
+          float d = dist(x, y, bush.x, bush.y);
+          if (d < closestDist) {
+            closestDist = d;
+            targetX = bush.x;
+            targetY = bush.y;
+          }
+        }
+      }
+      
+      if (closestDist < 10000) {
+        x += (targetX - x) * speed;
+        y += (targetY - y) * speed;
+      }
+    }
+    
+    if (thirst > 50) {
+      // Move towards water
+      boolean foundWater = false;
+      for (float angle = 0; angle < TWO_PI; angle += PI / 4) {
+        float nx = x + cos(angle);
+        float ny = y + sin(angle);
+        
+        if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
+          float h = getHeight(nx, ny, heightMap);
+          if (h < 0.35) {
+            x += cos(angle) * speed;
+            y += sin(angle) * speed;
+            foundWater = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  boolean canReproduce(Blob other) {
+    if (this.isMale == other.isMale) return false; // Same gender
+    if (this.hunger < 30 && other.hunger < 30) return false; // Both well-fed
+    if (this.age < 100 || other.age < 100) return false; // Too young
+    if (dist(this.x, this.y, other.x, other.y) > 2) return false; // Too far
+    
+    return true;
+  }
+  
+  boolean isDead() {
+    return age > maxAge || hunger > 100 || thirst > 100;
+  }
+  
+  void display() {
+    fill(isMale ? 100 : 200, 150, 100); // Brown/reddish for male, pinkish for female
+    circle(x * 5, y * 5, 3);
+  }
+  
+  float getHeight(float px, float py, float[][] heightMap) {
+    int ix = (int)px;
+    int iy = (int)py;
+    if (ix >= 0 && ix < gridWidth && iy >= 0 && iy < gridHeight) {
+      return heightMap[ix][iy];
+    }
+    return 0.5;
+  }
+}
+
+// Bush class
+class Bush {
+  float x, y;
+  int maxFruits = 3;
+  int fruits;
+  int regrowthCooldown = 0;
+  int regrowthTime = 500;
+  
+  Bush(float x, float y, int fruits) {
+    this.x = x;
+    this.y = y;
+    this.fruits = fruits;
+  }
+  
+  void regrow() {
+    if (fruits < maxFruits) {
+      regrowthCooldown++;
+      if (regrowthCooldown >= regrowthTime) {
+        fruits++;
+        regrowthCooldown = 0;
+      }
+    }
+  }
+  
+  void display() {
+    fill(34, 200, 34); // Green
+    circle(x * 5, y * 5, 2);
+    
+    // Draw fruits as small dots
+    fill(255, 0, 0); // Red
+    for (int i = 0; i < fruits; i++) {
+      float angle = TWO_PI * i / maxFruits;
+      float fx = x + cos(angle) * 0.3;
+      float fy = y + sin(angle) * 0.3;
+      circle(fx * 5, fy * 5, 1);
+    }
+  }
 }
